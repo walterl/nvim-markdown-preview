@@ -10,12 +10,30 @@ let s:highlight_path = s:script_path . '/highlight/'
 let s:Pandoc = {'name': 'Pandoc'}
 let s:output_path = tempname() . '.html'
 
+function! s:interpolate(str, tvars)
+  let ss = a:str
+  for key in keys(a:tvars)
+    let kvar = '${' . key . '}'
+    let idx = stridx(ss, kvar)
+
+    if idx > -1
+      let prefix = ''
+      if idx > 0 " Silly vimscript >:/
+        let prefix = ss[:idx-1]
+      endif
+      let ss = prefix . a:tvars[key] . ss[idx+len(kvar):]
+    endif
+  endfor
+  return ss
+endfunction
+
 function! s:Pandoc.generate(theme, restart) abort
   let input_path = expand('%:p')
   let filename = expand('%:r')
   let stylesheet = s:css_path . a:theme . '.css'
   let highlight = s:highlight_path . a:theme . '.theme'
   let input_format = get(g:, 'nvim_markdown_preview_format', 'gfm')
+  let cmd = get(g:, 'nvim_markdown_preview_convert_command', [])
 
   let self.server_index_path = s:output_path
   let self.server_root = fnamemodify(input_path, ':h')
@@ -24,21 +42,29 @@ function! s:Pandoc.generate(theme, restart) abort
     if a:restart > 0
       call s:LiveServer.stop()
     endif
-    call jobstart([
-          \ 'pandoc',
-          \ '-f', input_format,
-          \ input_path,
-          \ '-o', s:output_path,
-          \ '--standalone',
-          \ '-t', 'html',
-          \ '--katex',
-          \ '--highlight-style='.l:highlight,
-          \ '--metadata',
-          \ 'pagetitle='.filename,
-          \ '--include-in-header='.l:stylesheet,
-          \ ],
-          \ self
-          \ )
+    if l:cmd ==# []
+      let cmd = ['pandoc',
+            \ '-f', '${INPUT_FORMAT}',
+            \ '${INPUT_PATH}',
+            \ '-o', '${OUTPUT_PATH}',
+            \ '--standalone',
+            \ '-t', 'html',
+            \ '--katex',
+            \ '--highlight-style=${HIGHLIGHT}',
+            \ '--metadata', 'pagetitle=${FILENAME}',
+            \ '--include-in-header=${STYLESHEET}',
+            \ ]
+    endif
+
+    let tvars = {
+          \ 'INPUT_FORMAT': l:input_format,
+          \ 'INPUT_PATH': l:input_path,
+          \ 'FILENAME': l:filename,
+          \ 'OUTPUT_PATH': s:output_path,
+          \ 'HIGHLIGHT': l:highlight,
+          \ 'STYLESHEET': l:stylesheet,
+          \ }
+    call jobstart(map(cmd, {_, x -> s:interpolate(x, tvars)}), self)
   endif
 endfunction
 
